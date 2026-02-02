@@ -30,11 +30,12 @@ const works: CarouselItem[] = [
     title: "Pale Blue Dot",
   },
   {
-    id: "coming-soon",
+    id: "blog",
     type: "image",
-    src: "/works/project-2.svg",
-    alt: "Coming Soon",
-    title: "Coming Soon",
+    src: "/works/blog.svg",
+    alt: "Blog",
+    title: "Blog",
+    url: "/blogs",
   },
 ];
 
@@ -92,7 +93,11 @@ export default function WorksCarousel({ onIndexChange }: WorksCarouselProps) {
       if (elapsed < 200 && dx < 10 && dy < 10) {
         const currentWork = works[currentIndex];
         if (currentWork?.url) {
-          window.open(currentWork.url, "_blank", "noopener,noreferrer");
+          if (currentWork.url.startsWith("/")) {
+            window.location.href = currentWork.url;
+          } else {
+            window.open(currentWork.url, "_blank", "noopener,noreferrer");
+          }
         }
       }
     },
