@@ -12,6 +12,7 @@ const works: CarouselItem[] = [
     type: "image",
     src: "/works/avatar.jpg",
     alt: "Will Hong",
+    title: "Will Hong",
   },
   {
     id: "genapp",
@@ -22,17 +23,17 @@ const works: CarouselItem[] = [
     url: "https://genapp.now",
   },
   {
-    id: "3",
+    id: "pale-blue-dot",
     type: "image",
-    src: "/works/project-2.svg",
-    alt: "Project 3",
-    title: "Coming Soon",
+    src: "/works/pale-blue-dot.png",
+    alt: "Pale Blue Dot",
+    title: "Pale Blue Dot",
   },
   {
-    id: "4",
+    id: "coming-soon",
     type: "image",
-    src: "/works/project-3.svg",
-    alt: "Project 4",
+    src: "/works/project-2.svg",
+    alt: "Coming Soon",
     title: "Coming Soon",
   },
 ];
