@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
-  <rect width="400" height="400" fill="#fafafa"/>
-  <rect x="138" y="138" width="124" height="124" rx="16" fill="#f97316"/>
-  <g fill="white" transform="translate(150, 150)">
-    <path d="M30 20 L 30 40 L 55 40 Z"/>
-    <path d="M30 40 L 30 60 L 65 60 Z"/>
-    <path d="M30 60 L 30 80 L 75 80 Z"/>
-  </g>
-</svg>

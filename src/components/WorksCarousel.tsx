@@ -17,7 +17,7 @@ const works: CarouselItem[] = [
   {
     id: "genapp",
     type: "image",
-    src: "/works/genapp-logo.svg",
+    src: "/works/genapp.png",
     alt: "GenApp.now - Turn AI-generated code into real business in 60 seconds",
     title: "GenApp.now",
     url: "https://genapp.now",
