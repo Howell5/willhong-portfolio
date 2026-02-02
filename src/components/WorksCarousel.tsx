@@ -8,6 +8,12 @@ import BoxCarousel, {
 
 const works: CarouselItem[] = [
   {
+    id: "avatar",
+    type: "image",
+    src: "/works/avatar.jpg",
+    alt: "Will Hong",
+  },
+  {
     id: "genapp",
     type: "image",
     src: "/works/genapp-logo.svg",
@@ -16,23 +22,16 @@ const works: CarouselItem[] = [
     url: "https://genapp.now",
   },
   {
-    id: "2",
-    type: "image",
-    src: "/works/project-2.svg",
-    alt: "Project 2",
-    title: "Coming Soon",
-  },
-  {
     id: "3",
     type: "image",
-    src: "/works/project-3.svg",
+    src: "/works/project-2.svg",
     alt: "Project 3",
     title: "Coming Soon",
   },
   {
     id: "4",
     type: "image",
-    src: "/works/project-4.svg",
+    src: "/works/project-3.svg",
     alt: "Project 4",
     title: "Coming Soon",
   },
