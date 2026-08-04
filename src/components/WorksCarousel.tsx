@@ -44,7 +44,12 @@ interface WorksCarouselProps {
 }
 
 export default function WorksCarousel({ onIndexChange }: WorksCarouselProps) {
-  const [dimensions, setDimensions] = useState({ width: 320, height: 320 });
+  // 初始为 null：首帧不渲染 cube，等量完视口后直接以最终尺寸出现，
+  // 避免固定 320×320 → 真实尺寸的“由小变大”闪烁。
+  const [dimensions, setDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const carouselRef = useRef<BoxCarouselRef>(null);
   const clickStartTime = useRef<number>(0);
@@ -105,6 +110,22 @@ export default function WorksCarousel({ onIndexChange }: WorksCarouselProps) {
   );
 
   const currentWork = works[currentIndex];
+
+  if (!dimensions) {
+    // 首帧占位：尺寸与最终 cube 完全一致（min(85vw, 480px) 与 min(50vh, 480px)
+    // 取小，正方形），等价于 JS 的 size = Math.min(vw*0.85, 480, vh*0.5, 480)，
+    // cube 在尺寸就绪后直接出现，无任何缩放/跳动。
+    return (
+      <div className="flex flex-col items-center gap-4">
+        <div className="aspect-square w-[min(min(85vw,480px),min(50vh,480px))] max-w-full" />
+        {currentWork?.title && (
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            {currentWork.title}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center gap-4">
