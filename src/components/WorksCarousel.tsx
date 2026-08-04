@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import BoxCarousel, {
   type CarouselItem,
   type BoxCarouselRef,
@@ -51,9 +52,18 @@ export default function WorksCarousel({ onIndexChange }: WorksCarouselProps) {
     height: number;
   } | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+  // 下方文字：翻转开始时旧文字淡出（titleVisible=false），
+  // 翻转完成（onIndexChange）时新文字淡入（displayIndex 更新）
+  const [displayIndex, setDisplayIndex] = useState(0);
+  const [titleVisible, setTitleVisible] = useState(true);
   const carouselRef = useRef<BoxCarouselRef>(null);
   const clickStartTime = useRef<number>(0);
   const clickStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // 翻转开始：旧文字立即淡出（下面留白，直到翻转完成）
+  const handleFlipStart = useCallback(() => {
+    setTitleVisible(false);
+  }, []);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -78,6 +88,8 @@ export default function WorksCarousel({ onIndexChange }: WorksCarouselProps) {
   const handleIndexChange = useCallback(
     (index: number) => {
       setCurrentIndex(index);
+      setDisplayIndex(index);
+      setTitleVisible(true);
       onIndexChange?.(index);
     },
     [onIndexChange]
@@ -144,26 +156,36 @@ export default function WorksCarousel({ onIndexChange }: WorksCarouselProps) {
           autoPlay
           autoPlayInterval={4000}
           onIndexChange={handleIndexChange}
+          onFlipStart={handleFlipStart}
         />
       </div>
-      {currentWork?.title && (
-        <div className="text-center">
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            {currentWork.url ? (
-              <a
-                href={currentWork.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors"
-              >
-                {currentWork.title} ↗
-              </a>
-            ) : (
-              currentWork.title
-            )}
-          </p>
-        </div>
-      )}
+      <div className="text-center h-5">
+        <AnimatePresence initial={false}>
+          {titleVisible && works[displayIndex]?.title && (
+            <motion.p
+              key={displayIndex}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.28, ease: "easeInOut" }}
+              className="text-sm text-neutral-500 dark:text-neutral-400"
+            >
+              {works[displayIndex].url ? (
+                <a
+                  href={works[displayIndex].url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors"
+                >
+                  {works[displayIndex].title} ↗
+                </a>
+              ) : (
+                works[displayIndex].title
+              )}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
