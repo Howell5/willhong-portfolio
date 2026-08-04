@@ -122,6 +122,9 @@ interface SpringConfig {
   mass?: number;
 }
 
+// 松手角速度达到该值（deg/ms = 150°/s）时，惯性甩动额外翻 1 格。
+const FLING_STEP_VELOCITY = 0.15;
+
 // 每个 direction 下 4 个 face 的本地朝向角（deg），顺序与 faceTransforms 一致。
 // 世界朝向 = 本地朝向 + 整体旋转角，世界朝向最接近 0°（正面 +Z）的 face 即当前正面。
 const FACE_LOCAL_ANGLES: Record<RotationDirection, number[]> = {
@@ -163,6 +166,8 @@ interface BoxCarouselProps extends React.HTMLProps<HTMLDivElement> {
   autoPlay?: boolean;
   autoPlayInterval?: number;
   onIndexChange?: (index: number) => void;
+  /** 翻转动画开始时触发，参数为即将显示的面（用于提前切换下方文字） */
+  onFlipStart?: (index: number) => void;
   enableDrag?: boolean;
   dragSensitivity?: number;
 }
@@ -183,8 +188,9 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
       autoPlay = false,
       autoPlayInterval = 3000,
       onIndexChange,
+      onFlipStart,
       enableDrag = true,
-      dragSensitivity = 0.5,
+      dragSensitivity = 1,
       ...props
     },
     ref
@@ -205,11 +211,14 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
 
     const rotationCount = useRef(1);
     const isRotating = useRef(false);
-    const pendingIndexChange = useRef<number | null>(null);
+    const pendingSteps = useRef(0);
     const isDraggingRef = useRef(false);
     const [isDragging, setIsDragging] = useState(false);
     const startPosition = useRef({ x: 0, y: 0 });
     const startRotation = useRef(0);
+    // 拖拽角速度（deg/ms，滑动平均）与最近一次移动记录，用于惯性甩动
+    const velocityRef = useRef(0);
+    const lastMoveRef = useRef({ time: 0, pos: 0 });
 
     const baseRotateX = useMotionValue(0);
     const baseRotateY = useMotionValue(0);
@@ -218,55 +227,46 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
     const springRotateY = useSpring(baseRotateY, dragSpring);
 
     const handleAnimationComplete = useCallback(
-      (triggeredBy: string) => {
-        if (isRotating.current && pendingIndexChange.current !== null) {
-          isRotating.current = false;
+      (triggeredBy: "next" | "prev") => {
+        if (!isRotating.current || pendingSteps.current === 0) return;
+        isRotating.current = false;
 
-          let newFrontFaceIndex: number;
-          let currentBackFaceIndex: number;
+        // 多格翻转：逐格推进 front/item，并更新每格“转出视野”的槽位
+        const steps = pendingSteps.current;
+        const len = items.length;
+        const dir = triggeredBy === "next" ? 1 : -1;
+        let front = currentFrontFaceIndex;
+        let item = currentItemIndex;
 
-          if (triggeredBy === "next") {
-            newFrontFaceIndex = (currentFrontFaceIndex + 1) % 4;
-            currentBackFaceIndex = (newFrontFaceIndex + 2) % 4;
-          } else {
-            newFrontFaceIndex = (currentFrontFaceIndex - 1 + 4) % 4;
-            currentBackFaceIndex = (newFrontFaceIndex + 3) % 4;
+        for (let k = 0; k < steps; k++) {
+          const newFront = (front + dir + 4) % 4;
+          const backFace =
+            triggeredBy === "next" ? (newFront + 2) % 4 : (newFront + 3) % 4;
+          const newItem = (item + dir + len) % len;
+          const offset = triggeredBy === "next" ? 2 : -1;
+          const backValue = (newItem + offset + len) % len;
+
+          if (backFace === 0) {
+            setPrevIndex(backValue);
+          } else if (backFace === 1) {
+            setCurrentIndex(backValue);
+          } else if (backFace === 2) {
+            setNextIndex(backValue);
+          } else if (backFace === 3) {
+            setAfterNextIndex(backValue);
           }
 
-          setCurrentItemIndex(pendingIndexChange.current);
-          onIndexChange?.(pendingIndexChange.current);
-
-          const indexOffset = triggeredBy === "next" ? 2 : -1;
-
-          if (currentBackFaceIndex === 0) {
-            setPrevIndex(
-              (pendingIndexChange.current + indexOffset + items.length) %
-                items.length
-            );
-          } else if (currentBackFaceIndex === 1) {
-            setCurrentIndex(
-              (pendingIndexChange.current + indexOffset + items.length) %
-                items.length
-            );
-          } else if (currentBackFaceIndex === 2) {
-            setNextIndex(
-              (pendingIndexChange.current + indexOffset + items.length) %
-                items.length
-            );
-          } else if (currentBackFaceIndex === 3) {
-            setAfterNextIndex(
-              (pendingIndexChange.current + indexOffset + items.length) %
-                items.length
-            );
-          }
-
-          pendingIndexChange.current = null;
-          rotationCount.current++;
-
-          setCurrentFrontFaceIndex(newFrontFaceIndex);
+          front = newFront;
+          item = newItem;
         }
+
+        setCurrentItemIndex(item);
+        onIndexChange?.(item);
+        pendingSteps.current = 0;
+        rotationCount.current += steps;
+        setCurrentFrontFaceIndex(front);
       },
-      [currentFrontFaceIndex, items.length, onIndexChange]
+      [currentFrontFaceIndex, currentItemIndex, items.length, onIndexChange]
     );
 
     const handleDragStart = useCallback(
@@ -278,6 +278,8 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
         const point = "touches" in e ? e.touches[0] : e;
         startPosition.current = { x: point.clientX, y: point.clientY };
         startRotation.current = currentRotation;
+        velocityRef.current = 0;
+        lastMoveRef.current = { time: 0, pos: 0 };
 
         e.preventDefault();
       },
@@ -294,7 +296,10 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
 
         const isVertical = direction === "top" || direction === "bottom";
         const delta = isVertical ? deltaY : deltaX;
-        const rotationDelta = (delta * dragSensitivity) / 2;
+        const size = isVertical ? height : width;
+
+        // 表面映射跟手：拖过一个面宽 = 旋转 90°（像真的拨动立方体表面）
+        const rotationDelta = (delta / size) * 90 * dragSensitivity;
 
         let newRotation = startRotation.current;
 
@@ -313,8 +318,21 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
         } else {
           baseRotateY.set(newRotation);
         }
+
+        // 记录角速度（deg/ms，滑动平均），供松手时惯性甩动
+        const now = performance.now();
+        const pos = isVertical ? point.clientY : point.clientX;
+        const prev = lastMoveRef.current;
+        if (prev.time > 0 && now > prev.time) {
+          const instant =
+            ((pos - prev.pos) / (now - prev.time)) *
+            (90 / size) *
+            dragSensitivity;
+          velocityRef.current = velocityRef.current * 0.6 + instant * 0.4;
+        }
+        lastMoveRef.current = { time: now, pos };
       },
-      [direction, dragSensitivity, baseRotateX, baseRotateY]
+      [direction, dragSensitivity, baseRotateX, baseRotateY, width, height]
     );
 
     const handleDragEnd = useCallback(() => {
@@ -328,9 +346,15 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
 
       const snappedRotation = Math.round(currentValue / 90) * 90;
 
-      // 几何判定：snap 后哪个 face 转到正面。用 face 序号关系（而非拖拽方向/旋转符号）
-      // 决定 next/prev，从任意角度、任意方向拖拽都自洽。
-      const targetFrontFace = getFrontFaceIndex(direction, snappedRotation);
+      // 惯性甩动：松手角速度超过阈值时，额外翻 1-2 格（方向与甩动一致）
+      const flingSteps = Math.max(
+        -2,
+        Math.min(2, Math.round(velocityRef.current / FLING_STEP_VELOCITY))
+      );
+      const targetRotation = snappedRotation + flingSteps * 90;
+
+      // 几何判定：目标角度下哪个 face 转到正面（与方向/起始角度无关）
+      const targetFrontFace = getFrontFaceIndex(direction, targetRotation);
       const currentFrontFace = currentFrontFaceIndex;
 
       if (targetFrontFace === currentFrontFace) {
@@ -340,26 +364,31 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
         return;
       }
 
+      const rotationDiff = targetRotation - currentRotation;
+      const movingNext =
+        (direction === "left" || direction === "top")
+          ? rotationDiff < 0
+          : rotationDiff > 0;
+      const steps = Math.max(
+        1,
+        Math.min(3, Math.round(Math.abs(rotationDiff) / 90))
+      );
+
       isRotating.current = true;
-
-      const triggeredBy: "next" | "prev" =
-        targetFrontFace === (currentFrontFace + 1) % 4 ? "next" : "prev";
-
-      const newItemIndex =
-        triggeredBy === "next"
-          ? (currentItemIndex + 1) % items.length
-          : currentItemIndex === 0
-            ? items.length - 1
-            : currentItemIndex - 1;
-
-      pendingIndexChange.current = newItemIndex;
+      pendingSteps.current = steps;
+      const targetItem =
+        (currentItemIndex +
+          (movingNext ? steps : -steps) +
+          items.length) %
+        items.length;
+      onFlipStart?.(targetItem);
 
       const targetMotionValue = isVertical ? baseRotateX : baseRotateY;
-      animate(targetMotionValue, snappedRotation, {
+      animate(targetMotionValue, targetRotation, {
         ...snapTransition,
         onComplete: () => {
-          handleAnimationComplete(triggeredBy);
-          setCurrentRotation(snappedRotation);
+          handleAnimationComplete(movingNext ? "next" : "prev");
+          setCurrentRotation(targetRotation);
         },
       });
     }, [
@@ -372,6 +401,7 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
       items.length,
       snapTransition,
       handleAnimationComplete,
+      onFlipStart,
     ]);
 
     useEffect(() => {
@@ -394,8 +424,8 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
       if (items.length === 0 || isRotating.current) return;
 
       isRotating.current = true;
-      const newIndex = (currentItemIndex + 1) % items.length;
-      pendingIndexChange.current = newIndex;
+      pendingSteps.current = 1;
+      onFlipStart?.((currentItemIndex + 1) % items.length);
 
       if (direction === "top") {
         animate(baseRotateX, currentRotation + 90, {
@@ -439,15 +469,17 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
       baseRotateX,
       baseRotateY,
       handleAnimationComplete,
+      onFlipStart,
     ]);
 
     const prev = useCallback(() => {
       if (items.length === 0 || isRotating.current) return;
 
       isRotating.current = true;
-      const newIndex =
-        currentItemIndex === 0 ? items.length - 1 : currentItemIndex - 1;
-      pendingIndexChange.current = newIndex;
+      pendingSteps.current = 1;
+      onFlipStart?.(
+        currentItemIndex === 0 ? items.length - 1 : currentItemIndex - 1
+      );
 
       if (direction === "top") {
         animate(baseRotateX, currentRotation - 90, {
@@ -491,6 +523,7 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
       baseRotateX,
       baseRotateY,
       handleAnimationComplete,
+      onFlipStart,
     ]);
 
     useImperativeHandle(
