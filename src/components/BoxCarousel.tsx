@@ -122,6 +122,33 @@ interface SpringConfig {
   mass?: number;
 }
 
+// 每个 direction 下 4 个 face 的本地朝向角（deg），顺序与 faceTransforms 一致。
+// 世界朝向 = 本地朝向 + 整体旋转角，世界朝向最接近 0°（正面 +Z）的 face 即当前正面。
+const FACE_LOCAL_ANGLES: Record<RotationDirection, number[]> = {
+  left: [-90, 0, 90, 180],
+  right: [90, 0, -90, 180],
+  top: [90, 0, -90, 180],
+  bottom: [-90, 0, 90, 180],
+};
+
+function getFrontFaceIndex(
+  direction: RotationDirection,
+  rotation: number
+): number {
+  const locals = FACE_LOCAL_ANGLES[direction];
+  let best = 0;
+  let bestDiff = Infinity;
+  for (let i = 0; i < 4; i++) {
+    let diff = Math.abs(((locals[i] + rotation) % 360 + 360) % 360);
+    if (diff > 180) diff = 360 - diff;
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = i;
+    }
+  }
+  return best;
+}
+
 interface BoxCarouselProps extends React.HTMLProps<HTMLDivElement> {
   items: CarouselItem[];
   width: number;
@@ -179,7 +206,8 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
     const rotationCount = useRef(1);
     const isRotating = useRef(false);
     const pendingIndexChange = useRef<number | null>(null);
-    const isDragging = useRef(false);
+    const isDraggingRef = useRef(false);
+    const [isDragging, setIsDragging] = useState(false);
     const startPosition = useRef({ x: 0, y: 0 });
     const startRotation = useRef(0);
 
@@ -245,7 +273,8 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
       (e: React.MouseEvent | React.TouchEvent) => {
         if (!enableDrag || isRotating.current) return;
 
-        isDragging.current = true;
+        isDraggingRef.current = true;
+        setIsDragging(true);
         const point = "touches" in e ? e.touches[0] : e;
         startPosition.current = { x: point.clientX, y: point.clientY };
         startRotation.current = currentRotation;
@@ -257,7 +286,7 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
 
     const handleDragMove = useCallback(
       (e: MouseEvent | TouchEvent) => {
-        if (!isDragging.current || isRotating.current) return;
+        if (!isDraggingRef.current || isRotating.current) return;
 
         const point = "touches" in e ? e.touches[0] : e;
         const deltaX = point.clientX - startPosition.current.x;
@@ -289,52 +318,57 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
     );
 
     const handleDragEnd = useCallback(() => {
-      if (!isDragging.current) return;
+      if (!isDraggingRef.current) return;
 
-      isDragging.current = false;
+      isDraggingRef.current = false;
+      setIsDragging(false);
 
       const isVertical = direction === "top" || direction === "bottom";
       const currentValue = isVertical ? baseRotateX.get() : baseRotateY.get();
 
-      const quarterRotations = Math.round(currentValue / 90);
-      const snappedRotation = quarterRotations * 90;
+      const snappedRotation = Math.round(currentValue / 90) * 90;
 
-      const rotationDifference = snappedRotation - currentRotation;
-      const steps = Math.round(rotationDifference / 90);
+      // 几何判定：snap 后哪个 face 转到正面。用 face 序号关系（而非拖拽方向/旋转符号）
+      // 决定 next/prev，从任意角度、任意方向拖拽都自洽。
+      const targetFrontFace = getFrontFaceIndex(direction, snappedRotation);
+      const currentFrontFace = currentFrontFaceIndex;
 
-      if (steps !== 0) {
-        isRotating.current = true;
-
-        let newItemIndex = currentItemIndex;
-        for (let i = 0; i < Math.abs(steps); i++) {
-          if (steps > 0) {
-            newItemIndex = (newItemIndex + 1) % items.length;
-          } else {
-            newItemIndex =
-              newItemIndex === 0 ? items.length - 1 : newItemIndex - 1;
-          }
-        }
-
-        pendingIndexChange.current = newItemIndex;
-
-        const targetMotionValue = isVertical ? baseRotateX : baseRotateY;
-        animate(targetMotionValue, snappedRotation, {
-          ...snapTransition,
-          onComplete: () => {
-            handleAnimationComplete(steps > 0 ? "next" : "prev");
-            setCurrentRotation(snappedRotation);
-          },
-        });
-      } else {
+      if (targetFrontFace === currentFrontFace) {
+        // 未跨过 90° 边界，回弹到起始角度
         const targetMotionValue = isVertical ? baseRotateX : baseRotateY;
         animate(targetMotionValue, currentRotation, snapTransition);
+        return;
       }
+
+      isRotating.current = true;
+
+      const triggeredBy: "next" | "prev" =
+        targetFrontFace === (currentFrontFace + 1) % 4 ? "next" : "prev";
+
+      const newItemIndex =
+        triggeredBy === "next"
+          ? (currentItemIndex + 1) % items.length
+          : currentItemIndex === 0
+            ? items.length - 1
+            : currentItemIndex - 1;
+
+      pendingIndexChange.current = newItemIndex;
+
+      const targetMotionValue = isVertical ? baseRotateX : baseRotateY;
+      animate(targetMotionValue, snappedRotation, {
+        ...snapTransition,
+        onComplete: () => {
+          handleAnimationComplete(triggeredBy);
+          setCurrentRotation(snappedRotation);
+        },
+      });
     }, [
       direction,
       baseRotateX,
       baseRotateY,
       currentRotation,
       currentItemIndex,
+      currentFrontFaceIndex,
       items.length,
       snapTransition,
       handleAnimationComplete,
@@ -475,7 +509,7 @@ const BoxCarousel = forwardRef<BoxCarouselRef, BoxCarouselProps>(
     );
 
     const transform = useTransform(
-      isDragging.current
+      isDragging
         ? [springRotateX, springRotateY]
         : [baseRotateX, baseRotateY],
       ([x, y]) =>
